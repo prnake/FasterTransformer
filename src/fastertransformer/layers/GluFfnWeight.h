@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019-2022, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2019-2021, NVIDIA CORPORATION.  All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,22 +16,14 @@
 
 #pragma once
 
-#include "src/fastertransformer/utils/cuda_bf16_wrapper.h"
-#include <cuda_fp16.h>
-#include <cuda_runtime.h>
+#include "DenseWeight.h"
 
 namespace fastertransformer {
 
 template<typename T>
-void invokeAddBiasGelu(T* out, const T* bias, const int m, const int n, cudaStream_t stream);
-
-template<typename T>
-void invokeAddBiasRelu(T* out, const T* bias, const int m, const int n, cudaStream_t stream);
-
-template<typename F_T, typename B_T>
-void invokeAddBias(F_T* out, const B_T* bias, const int m, const int n, cudaStream_t stream);
-
-template<typename F_T, typename B_T>
-void invokeDot(F_T* out, const B_T* in, const int m, const int n, cudaStream_t stream);
+struct GluFfnWeight {
+    DenseWeight<T> intermediate_weight[2];
+    DenseWeight<T> output_weight;
+};
 
 }  // namespace fastertransformer

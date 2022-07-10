@@ -259,6 +259,7 @@ add_library(transformer-static STATIC
   $<TARGET_OBJECTS:DecoderSelfAttentionLayer>
   $<TARGET_OBJECTS:DynamicDecodeLayer>
   $<TARGET_OBJECTS:FfnLayer>
+  $<TARGET_OBJECTS:GluFfnLayer>
   $<TARGET_OBJECTS:FusedAttentionLayer>
   $<TARGET_OBJECTS:GptContextAttentionLayer>
   $<TARGET_OBJECTS:GptJ>
@@ -281,6 +282,7 @@ add_library(transformer-static STATIC
   $<TARGET_OBJECTS:TensorParallelDecoderCrossAttentionLayer>
   $<TARGET_OBJECTS:TensorParallelDecoderSelfAttentionLayer>
   $<TARGET_OBJECTS:TensorParallelGeluFfnLayer>
+  $<TARGET_OBJECTS:TensorParallelGeluGluFfnLayer>
   $<TARGET_OBJECTS:TensorParallelGptContextAttentionLayer>
   $<TARGET_OBJECTS:TensorParallelReluFfnLayer>
   $<TARGET_OBJECTS:TensorParallelUnfusedAttentionLayer>
@@ -334,6 +336,7 @@ add_library(transformer-shared SHARED
   $<TARGET_OBJECTS:DecoderSelfAttentionLayer>
   $<TARGET_OBJECTS:DynamicDecodeLayer>
   $<TARGET_OBJECTS:FfnLayer>
+  $<TARGET_OBJECTS:GluFfnLayer>
   $<TARGET_OBJECTS:FusedAttentionLayer>
   $<TARGET_OBJECTS:GptContextAttentionLayer>
   $<TARGET_OBJECTS:GptJ>
@@ -356,6 +359,7 @@ add_library(transformer-shared SHARED
   $<TARGET_OBJECTS:TensorParallelDecoderCrossAttentionLayer>
   $<TARGET_OBJECTS:TensorParallelDecoderSelfAttentionLayer>
   $<TARGET_OBJECTS:TensorParallelGeluFfnLayer>
+  $<TARGET_OBJECTS:TensorParallelGeluGluFfnLayer>
   $<TARGET_OBJECTS:TensorParallelGptContextAttentionLayer>
   $<TARGET_OBJECTS:TensorParallelReluFfnLayer>
   $<TARGET_OBJECTS:TensorParallelUnfusedAttentionLayer>
