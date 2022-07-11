@@ -74,9 +74,7 @@ private:
     void initialize();
 
 protected:
-    T* decoder_normed_input_;
     T* self_attn_output_;
-    T* ffn_output_;
     T* decoder_layer_output_;
 
 public:

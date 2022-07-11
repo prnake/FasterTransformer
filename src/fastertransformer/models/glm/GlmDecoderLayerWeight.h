@@ -39,9 +39,11 @@ public:
 
     void loadModel(std::string dir_path, FtCudaDataType model_file_type);
 
-    LayerNormWeight<T> pre_layernorm_weights;
     AttentionWeight<T> self_attention_weights;
+    LayerNormWeight<T> self_attn_layernorm_weights;
     GluFfnWeight<T> glu_ffn_weights;
+    LayerNormWeight<T> glu_ffn_layernorm_weights;
+
 
 private:
     int hidden_units_;
@@ -49,7 +51,7 @@ private:
     int tensor_para_size_;
     int tensor_para_rank_;
     bool is_maintain_buffer = false;
-    T* weights_ptr[11];
+    T* weights_ptr[14];
 
     void setWeightPtr();
     void mallocWeights();

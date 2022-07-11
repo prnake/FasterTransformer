@@ -60,11 +60,7 @@ template<typename T>
 void GlmContextDecoder<T>::allocateBuffer()
 {
     if (is_allocate_buffer_ == false) {
-        decoder_normed_input_ =
-            reinterpret_cast<T*>(allocator_->malloc(sizeof(T) * max_batch_size_ * max_seq_len_ * hidden_units_, false));
         self_attn_output_ =
-            reinterpret_cast<T*>(allocator_->malloc(sizeof(T) * max_batch_size_ * max_seq_len_ * hidden_units_, false));
-        ffn_output_ =
             reinterpret_cast<T*>(allocator_->malloc(sizeof(T) * max_batch_size_ * max_seq_len_ * hidden_units_, false));
         decoder_layer_output_ =
             reinterpret_cast<T*>(allocator_->malloc(sizeof(T) * max_batch_size_ * max_seq_len_ * hidden_units_, false));
@@ -76,9 +72,7 @@ template<typename T>
 void GlmContextDecoder<T>::freeBuffer()
 {
     if (is_allocate_buffer_ == true) {
-        allocator_->free(decoder_normed_input_);
         allocator_->free(self_attn_output_);
-        allocator_->free(ffn_output_);
         allocator_->free(decoder_layer_output_);
         is_allocate_buffer_ = false;
     }
@@ -293,20 +287,21 @@ void GlmContextDecoder<T>::forward(std::unordered_map<std::string, Tensor>* outp
                 }
             }
 
-            invokeGeneralLayerNorm(decoder_normed_input_,
-                                   layer_input,
-                                   gpt_decoder_layer_weight->at(l).pre_layernorm_weights.gamma,
-                                   gpt_decoder_layer_weight->at(l).pre_layernorm_weights.beta,
-                                   local_batch_size * seq_len,
-                                   hidden_units_,
-                                   stream_);
             sync_check_cuda_error();
+
+            // papersnake
+            // attn_output = attn(layer_input)
+            // attn_output = layer_input * alpha + attn_output
+            // attn_output = layernorm_1(attn_output)
+            // ffn_output = geglu_ffn(attn_output)
+            // layer_output = attn_output * alpha + ffn_output
+            // layer_output = layernorm_2(layer_output)
 
             std::vector<Tensor> self_attention_input_tensors{
                 Tensor{MEMORY_GPU,
                        data_type,
                        {(size_t)(local_batch_size * seq_len), (size_t)hidden_units_},
-                       decoder_normed_input_},
+                       layer_input},
                 Tensor{MEMORY_GPU,
                        data_type,
                        {(size_t)local_batch_size, (size_t)1, (size_t)seq_len, (size_t)seq_len},
@@ -331,34 +326,43 @@ void GlmContextDecoder<T>::forward(std::unordered_map<std::string, Tensor>* outp
                 Tensor{MEMORY_GPU, data_type, self_k_cache_size, ((const T*)k_cache.data) + cache_offset},
                 Tensor{MEMORY_GPU, data_type, self_v_cache_size, ((const T*)v_cache.data) + cache_offset}};
 
-            self_attention_layer_->forward(&self_attention_output_tensors,  // self_attn_output_
+            self_attention_layer_->forward(&self_attention_output_tensors,
                                            &self_attention_input_tensors,
                                            &gpt_decoder_layer_weight->at(l).self_attention_weights);
-
-            // papersnake
-            // invokeAddBiasResidualLayerNorm + alpha -> new attn
-            // ffn(new attn)
-            // invokeAddBiasResidualLayerNorm + alpha -> new attn
             
+            invokeAlphaAddBiasResidualLayerNorm(
+                self_attn_output_,
+                layer_input,
+                gpt_decoder_layer_weight->at(l).self_attention_weights.attention_output_weight.bias,
+                gpt_decoder_layer_weight->at(l).self_attn_layernorm_weights.gamma,
+                gpt_decoder_layer_weight->at(l).self_attn_layernorm_weights.beta,
+                T(sqrt(2 * l)),
+                local_batch_size * seq_len,
+                hidden_units_,
+                stream_);
+            sync_check_cuda_error();
+
             if (is_final == false) {
                 std::vector<Tensor> ffn_input_tensors{
                     Tensor{MEMORY_GPU,
                            data_type,
                            {(size_t)(local_batch_size * seq_len), (size_t)hidden_units_},
-                           decoder_normed_input_}};
-                std::vector<Tensor> ffn_output_tensors{Tensor{
-                    MEMORY_GPU, data_type, {(size_t)(local_batch_size * seq_len), (size_t)hidden_units_}, ffn_output_}};
+                           self_attn_output_}};
+                std::vector<Tensor> glu_ffn_output_tensors{Tensor{
+                    MEMORY_GPU, data_type, {(size_t)(local_batch_size * seq_len), (size_t)hidden_units_}, layer_output}};
                 glu_ffn_layer_->forward(
-                    &ffn_output_tensors, &ffn_input_tensors, &gpt_decoder_layer_weight->at(l).glu_ffn_weights);
+                    &glu_ffn_output_tensors, &ffn_input_tensors, &gpt_decoder_layer_weight->at(l).glu_ffn_weights);
 
-                invokeAddBiasAttentionFfnResidual(layer_output,
-                                                  ffn_output_,
-                                                  self_attn_output_,
-                                                  layer_input,
-                                                  gpt_decoder_layer_weight->at(l).glu_ffn_weights.output_weight.bias,
-                                                  local_batch_size * seq_len,
-                                                  hidden_units_,
-                                                  stream_);
+                invokeAlphaAddBiasResidualLayerNorm(
+                    layer_output,
+                    self_attn_output_,
+                    gpt_decoder_layer_weight->at(l).glu_ffn_weights.output_weight.bias,
+                    gpt_decoder_layer_weight->at(l).glu_ffn_layernorm_weights.gamma,
+                    gpt_decoder_layer_weight->at(l).glu_ffn_layernorm_weights.beta,
+                    T(sqrt(2 * l)),
+                    local_batch_size * seq_len,
+                    hidden_units_,
+                    stream_);
                 sync_check_cuda_error();
 
                 if (isLastLayerParallelId(l) && pipeline_para_.rank_ != pipeline_para_.world_size_ - 1
@@ -373,7 +377,6 @@ void GlmContextDecoder<T>::forward(std::unordered_map<std::string, Tensor>* outp
             }
         }
     }
-
     // TODO(bhsueh) We could optimize this point by only computing the last token for the last layer
     invokeLookupHiddenStateOfLastToken((T*)output_tensors->at("last_token_hidden_units").data,
                                        (T*)output_tensors->at("decoder_output").data,

@@ -61,9 +61,7 @@ protected:
     std::shared_ptr<AbstractCustomComm> custom_all_reduce_comm_;
     int enable_custom_all_reduce_;
 
-    T* decoder_normed_input_;
     T* self_attn_output_;
-    T* ffn_output_;
     T* decoder_layer_output_;
 
     BaseAttentionLayer<T>* self_attention_layer_;

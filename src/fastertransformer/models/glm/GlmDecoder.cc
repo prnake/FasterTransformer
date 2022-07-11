@@ -58,11 +58,8 @@ template<typename T>
 void GlmDecoder<T>::allocateBuffer()
 {
     if (is_allocate_buffer_ == false) {
-        decoder_normed_input_ =
-            reinterpret_cast<T*>(allocator_->malloc(sizeof(T) * max_batch_size_ * hidden_units_, false));
         self_attn_output_ =
             reinterpret_cast<T*>(allocator_->malloc(sizeof(T) * max_batch_size_ * hidden_units_, false));
-        ffn_output_ = reinterpret_cast<T*>(allocator_->malloc(sizeof(T) * max_batch_size_ * hidden_units_, false));
         decoder_layer_output_ =
             reinterpret_cast<T*>(allocator_->malloc(sizeof(T) * max_batch_size_ * hidden_units_, false));
         is_allocate_buffer_ = true;
@@ -73,9 +70,7 @@ template<typename T>
 void GlmDecoder<T>::freeBuffer()
 {
     if (is_allocate_buffer_ == true) {
-        allocator_->free(decoder_normed_input_);
         allocator_->free(self_attn_output_);
-        allocator_->free(ffn_output_);
         allocator_->free(decoder_layer_output_);
         is_allocate_buffer_ = false;
     }
@@ -269,17 +264,18 @@ void GlmDecoder<T>::forward(std::unordered_map<std::string, Tensor>* output_tens
             }
         }
 
-        invokeGeneralLayerNorm(decoder_normed_input_,
-                               layer_input,
-                               gpt_decoder_layer_weight->at(l).pre_layernorm_weights.gamma,
-                               gpt_decoder_layer_weight->at(l).pre_layernorm_weights.beta,
-                               local_batch_size,
-                               hidden_units_,
-                               stream_);
         sync_check_cuda_error();
 
+        // papersnake
+        // attn_output = attn(layer_input)
+        // attn_output = layer_input * alpha + attn_output
+        // attn_output = layernorm_1(attn_output)
+        // ffn_output = geglu_ffn(attn_output)
+        // layer_output = attn_output * alpha + ffn_output
+        // layer_output = layernorm_2(layer_output)
+
         std::vector<Tensor> self_attention_input_tensors{
-            Tensor{MEMORY_GPU, data_type, {local_batch_size, hidden_units_}, decoder_normed_input_},
+            Tensor{MEMORY_GPU, data_type, {local_batch_size, hidden_units_}, layer_input},
             input_tensors->at("finished"),
             input_tensors->at("sequence_lengths"),
             input_tensors->at("input_lengths"),
@@ -306,20 +302,34 @@ void GlmDecoder<T>::forward(std::unordered_map<std::string, Tensor>* output_tens
                                        &self_attention_input_tensors,
                                        &gpt_decoder_layer_weight->at(l).self_attention_weights);
 
+        invokeAlphaAddBiasResidualLayerNorm(
+            self_attn_output_,
+            layer_input,
+            gpt_decoder_layer_weight->at(l).self_attention_weights.attention_output_weight.bias,
+            gpt_decoder_layer_weight->at(l).self_attn_layernorm_weights.gamma,
+            gpt_decoder_layer_weight->at(l).self_attn_layernorm_weights.beta,
+            T(sqrt(2 * l)),
+            local_batch_size,
+            hidden_units_,
+            stream_);
+        sync_check_cuda_error();
+        
         std::vector<Tensor> ffn_input_tensors{
             Tensor{MEMORY_GPU, data_type, {local_batch_size, hidden_units_}, self_attn_output_}};
         std::vector<Tensor> ffn_output_tensors{
-            Tensor{MEMORY_GPU, data_type, {local_batch_size, hidden_units_}, ffn_output_}};
+            Tensor{MEMORY_GPU, data_type, {local_batch_size, hidden_units_}, layer_output}};
         glu_ffn_layer_->forward(&ffn_output_tensors, &ffn_input_tensors, &gpt_decoder_layer_weight->at(l).glu_ffn_weights);
 
-        invokeAddBiasAttentionFfnResidual(layer_output,
-                                          ffn_output_,
-                                          self_attn_output_,
-                                          layer_input,
-                                          gpt_decoder_layer_weight->at(l).glu_ffn_weights.output_weight.bias,
-                                          local_batch_size,
-                                          hidden_units_,
-                                          stream_);
+        invokeAlphaAddBiasResidualLayerNorm(
+            layer_output,
+            self_attn_output_,
+            gpt_decoder_layer_weight->at(l).glu_ffn_weights.output_weight.bias,
+            gpt_decoder_layer_weight->at(l).glu_ffn_layernorm_weights.gamma,
+            gpt_decoder_layer_weight->at(l).glu_ffn_layernorm_weights.beta,
+            T(sqrt(2 * l)),
+            local_batch_size,
+            hidden_units_,
+            stream_);
         sync_check_cuda_error();
 
         if (isLastLayerParallelId(l) == true && pipeline_para_.rank_ != pipeline_para_.world_size_ - 1

@@ -45,6 +45,17 @@ void invokeAddBiasResidualLayerNorm(T* out,
                                     cudaStream_t stream);
 
 template<typename T>
+void invokeAlphaAddBiasResidualLayerNorm(T* out,
+                                    const T* input,
+                                    const T* bias,
+                                    const T* gamma,
+                                    const T* beta,
+                                    const T alpha,
+                                    const int m,
+                                    const int n,
+                                    cudaStream_t stream);
+
+template<typename T>
 void invokeGeneralAddBiasResidualPreLayerNorm(T* output,
                                               T* norm_output,
                                               const T* input,
