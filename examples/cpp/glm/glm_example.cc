@@ -299,7 +299,7 @@ void glm_example(const INIReader reader)
                           inter_size,
                           decoder_layers,
                           vocab_size,
-                          rotary_embedding_dim,
+                          -rotary_embedding_dim,
                           start_id,
                           end_id,
                           0.0f,
@@ -364,13 +364,13 @@ void glm_example(const INIReader reader)
 
     print_mem_usage();
 
-    int ite = 1;
+    int ite = 2;
     cudaDeviceSynchronize();
     MPI_Barrier(MPI_COMM_WORLD);
 
     cudaProfilerStart();
     // warm up
-    ite = 1;
+    ite = 2;
     nvtx::setScope("warmup_time");
     PUSH_RANGE("warmup time")
     for (int i = 0; i < ite; ++i) {
