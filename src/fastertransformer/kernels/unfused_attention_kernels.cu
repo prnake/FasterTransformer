@@ -1170,6 +1170,72 @@ __global__ void add_fusedQKV_bias_transpose_kernel(T* q_buf,
     *reinterpret_cast<Vec_t*>(&v_buf[dest_idx]) = v;
 }
 
+// the index impl in glm is different from origin
+template<typename T>
+__global__ void glm_add_fusedQKV_bias_transpose_kernel(T* q_buf,
+                                                   T* k_buf,
+                                                   T* v_buf,
+                                                   const T* __restrict QKV,
+                                                   const T* __restrict qkv_bias,
+                                                   const int batch_size,
+                                                   const int seq_len,
+                                                   const int head_num,
+                                                   const int size_per_head,
+                                                   const int rotary_embedding_dim)
+{
+    using Vec_t = typename Vec_t<T>::Type;
+    const int batch_idx = blockIdx.z;
+    const int head_idx = blockIdx.y;
+    const int seq_idx = blockIdx.x;
+    const int tidx = threadIdx.x;
+    const int offset = size_per_head / 2;
+    if (tidx >= offset) {
+        return;
+    }
+
+    const int batch_time_idx = seq_len * batch_idx + seq_idx;
+    const int hidden_idx = head_idx * size_per_head + tidx;
+    const int n = head_num * size_per_head;
+
+    // src QKV: [batch, time, 3, head, hidden]
+    const int q_idx = batch_time_idx * 3 * n + hidden_idx;
+    const int k_idx = batch_time_idx * 3 * n + hidden_idx + n;
+    const int v_idx = batch_time_idx * 3 * n + hidden_idx + 2 * n;
+
+    T _q[2] = {QKV[q_idx], QKV[q_idx+offset]};
+    T _k[2] = {QKV[k_idx], QKV[k_idx+offset]};
+    T _v[2] = {QKV[v_idx], QKV[v_idx+offset]};
+    T _q_bias[2] = {qkv_bias[hidden_idx], qkv_bias[hidden_idx + offset]};
+    T _k_bias[2] = {qkv_bias[hidden_idx], qkv_bias[hidden_idx + n + offset]};
+    T _v_bias[2] = {qkv_bias[hidden_idx], qkv_bias[hidden_idx + 2 * n + offset]};
+
+    Vec_t q = *reinterpret_cast<const Vec_t*>(&_q);
+    Vec_t k = *reinterpret_cast<const Vec_t*>(&_k);
+    Vec_t v = *reinterpret_cast<const Vec_t*>(&_v);
+
+    // qkv_bias: [3, head, hidden]
+    Vec_t q_bias = *reinterpret_cast<const Vec_t*>(&_q_bias);
+    Vec_t k_bias = *reinterpret_cast<const Vec_t*>(&_k_bias);
+    Vec_t v_bias = *reinterpret_cast<const Vec_t*>(&_v_bias);
+
+    q = mmha::add(q, q_bias);
+    k = mmha::add(k, k_bias);
+    v = mmha::add(v, v_bias);
+
+    mmha::apply_rotary_embedding(q, k, tidx, rotary_embedding_dim, seq_idx);
+
+    // q_buf, k_buf, v_buf: [batch, head_num, seq_len, size_per_head]
+    const int dest_idx = size_per_head * seq_len * head_num * batch_idx + size_per_head * seq_len * head_idx
+                         + size_per_head * seq_idx + tidx;
+
+    *reinterpret_cast<Vec_t*>(&_q) = q;
+    *reinterpret_cast<Vec_t*>(&_k) = k;
+    *reinterpret_cast<Vec_t*>(&_v) = v;
+    q_buf[dest_idx] = _q[0], q_buf[dest_idx + offset] = _q[1];
+    k_buf[dest_idx] = _k[0], k_buf[dest_idx + offset] = _k[1];
+    v_buf[dest_idx] = _v[0], v_buf[dest_idx + offset] = _v[1];
+}
+
 template<typename T>
 void invokeAddFusedQKVBiasTranspose(T* q_buf,
                                     T* k_buf,
@@ -1195,8 +1261,12 @@ void invokeAddFusedQKVBiasTranspose(T* q_buf,
         // To implement rotary embeddings, each thread processes two QKV elems:
         dim3 block((size_per_head / 2 + 31) / 32 * 32);
         dim3 grid(seq_len, head_num, batch_size);
-        add_fusedQKV_bias_transpose_kernel<<<grid, block, 0, stream>>>(
-            q_buf, k_buf, v_buf, QKV, qkv_bias, batch_size, seq_len, head_num, size_per_head, rotary_embedding_dim);
+        if(rotary_embedding_dim > 0) 
+            add_fusedQKV_bias_transpose_kernel<<<grid, block, 0, stream>>>(
+                q_buf, k_buf, v_buf, QKV, qkv_bias, batch_size, seq_len, head_num, size_per_head, rotary_embedding_dim);
+        else
+            glm_add_fusedQKV_bias_transpose_kernel<<<grid, block, 0, stream>>>(
+                q_buf, k_buf, v_buf, QKV, qkv_bias, batch_size, seq_len, head_num, size_per_head, -rotary_embedding_dim);
     }
 }
 

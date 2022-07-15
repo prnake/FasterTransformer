@@ -541,7 +541,7 @@ __global__ void alphaAddBiasResidualPostLayerNormHalf(
     float mean = 0.0f;
     float variance = 0.0f;
 
-    half2 alpha2 = {alpha, alpha};
+    half2 alpha2 = make_half2(alpha, alpha);
     half2* out_ptr = (half2*)out;
     const half2* input_ptr = (const half2*)input;
     const half2* bias_ptr = (const half2*)bias;
@@ -643,7 +643,7 @@ __global__ void generalAlphaAddBiasResidualPostLayerNorm(
     float mean = 0.0f;
     float variance = 0.0f;
 
-    half2 alpha2 = {alpha, alpha};
+    half2 alpha2 = make_half2(alpha, alpha);
     half2* out_ptr = (half2*)out;
     const half2* input_ptr = (const half2*)input;
     const half2* bias_ptr = (const half2*)bias;
@@ -765,7 +765,7 @@ __global__ void alphaAddBiasResidualPostLayerNormV2(half* out,
     float variance = 0.0f;
     half2 local_out_half2[ite];
 
-    half2 alpha2 = {alpha, alpha};
+    half2 alpha2 = make_half2(alpha, alpha);
     half2* out_ptr = (half2*)out;
     const half2* input_ptr = (const half2*)input;
     const half2* bias_ptr = (const half2*)bias;
